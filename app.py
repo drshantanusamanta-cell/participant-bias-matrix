@@ -32,6 +32,8 @@ st.markdown("""
 .card p{margin:0;font-size:.9rem;opacity:.95}
 .flag{border-left:5px solid #f39c12;background:#fef5e7;padding:8px 12px;margin-bottom:6px;border-radius:6px;font-size:.9rem}
 .big{font-size:1.6rem;font-weight:700}
+.ctitle{font-weight:600;font-size:1rem;margin:.6rem 0 .1rem 0;line-height:1.3}
+@media (max-width:640px){.big{font-size:1.3rem}.card h4{font-size:.95rem}.ctitle{font-size:.92rem}}
 </style>""", unsafe_allow_html=True)
 
 
@@ -58,6 +60,24 @@ def run_fetch(start=None, end=None):
         st.session_state["fetch_msg"] = ("error", f"Fetch failed: {e}. If NSE is blocking this server, "
                                                   "use 'Add data from files' instead.")
     st.rerun()
+
+
+def show(target, fig, zoom=False):
+    """Render a Plotly chart so it works on phone, tablet and desktop: title as page text above the chart
+    (wraps instead of being cut off), legend below the plot, toolbar only on zoomable charts."""
+    title = fig.layout.title.text
+    if title:
+        target.markdown(f"<div class='ctitle'>{title}</div>", unsafe_allow_html=True)
+        fig.update_layout(title=None)
+    has_sel = bool(fig.layout.xaxis.rangeselector and fig.layout.xaxis.rangeselector.buttons)
+    if fig.layout.showlegend is not False:
+        fig.update_layout(legend=dict(orientation="h", x=0, xanchor="left", y=-0.12, yanchor="top",
+                                      font=dict(size=11)))
+    fig.update_layout(margin=dict(l=8, r=8, t=40 if has_sel else 12, b=10), autosize=True)
+    # No floating toolbar: it covered titles and the 1M-All buttons on small screens.
+    # Drag-to-zoom and double-click-to-reset still work everywhere; mouse-wheel zoom on zoomable charts.
+    cfg = {"displaylogo": False, "responsive": True, "displayModeBar": False, "scrollZoom": zoom}
+    target.plotly_chart(fig, width="stretch", config=cfg)
 
 
 def fmt(k, v):
@@ -101,11 +121,12 @@ def cross_matrix(short_b, med_b):
                       .replace("Aligned ", "Aligned<br>"))
         z.append(zr)
         text.append(tr)
-    fig = go.Figure(go.Heatmap(z=z, x=[f"Medium: {m}" for m in rows], y=[f"Short: {s}" for s in rows],
+    fig = go.Figure(go.Heatmap(z=z, x=[f"Medium<br>{m}" for m in rows], y=[f"Short<br>{s}" for s in rows],
                                text=text, texttemplate="%{text}", textfont={"size": 12},
                                colorscale=[[0, "#f4f6f7"], [1, "#f9e79f"]], showscale=False,
                                xgap=4, ygap=4, hoverinfo="skip"))
-    fig.update_yaxes(autorange="reversed")
+    fig.update_yaxes(autorange="reversed", tickfont=dict(size=11))
+    fig.update_xaxes(tickangle=0, tickfont=dict(size=11), side="bottom")
     fig.update_layout(height=260, margin=dict(l=10, r=10, t=30, b=10),
                       title={"text": "Where today sits (highlighted)", "font": {"size": 14}})
     return fig
@@ -210,8 +231,8 @@ def main():
             col.markdown(f"<div style='text-align:center'><span style='color:#566573'>{ttl}</span><br>"
                          f"<span style='font-size:1.5rem;font-weight:700;color:{BIAS_COL[lab]}'>{lab}</span></div>",
                          unsafe_allow_html=True)
-            col.plotly_chart(gauge(val, ttl), width="stretch")
-        c3.plotly_chart(cross_matrix(core.bucket3(s_val), core.bucket3(m_val)), width="stretch")
+            col.plotly_chart(gauge(val, ttl), width="stretch", config={"displayModeBar": False})
+        show(c3, cross_matrix(core.bucket3(s_val), core.bucket3(m_val)))
 
         verdict = core.CROSS[(core.bucket3(s_val), core.bucket3(m_val))]
         nclose = nifty.get(last, np.nan) if not nifty.empty else np.nan
@@ -268,14 +289,14 @@ def main():
                         textposition="middle right", textfont=dict(color="#1c2833", size=13))
         fig.update_layout(barmode="relative", title="Index futures: long vs short (contracts)", height=380,
                           xaxis_range=[-0.5, 3.95])
-        c1.plotly_chart(fig, width="stretch")
+        show(c1, fig)
 
         share = [h[f"{c}_FIL"] / (h[f"{c}_FIL"] + h[f"{c}_FIS"]) * 100 for c in cats]
         fig = go.Figure(go.Bar(x=share, y=cats, orientation="h", marker_color=[CAT_COL[c] for c in cats],
                                text=[f"{s:.1f}%" for s in share], textposition="outside"))
         fig.add_vline(x=50, line_dash="dash", line_color="grey")
         fig.update_layout(title="Long share of each group's index-futures book", xaxis_range=[0, 100], height=380)
-        c2.plotly_chart(fig, width="stretch")
+        show(c2, fig)
 
         c1, c2 = st.columns(2)
         for col, cat in [(c1, "FII"), (c2, "Pro")]:
@@ -284,7 +305,7 @@ def main():
                                    marker_color=["#27ae60", "#82e0aa", "#e67e22", "#c0392b"],
                                    text=[f"{abs(v):,.0f}" for v in vals], textposition="outside"))
             fig.update_layout(title=f"{cat} index options (bullish legs up, bearish legs down)", height=360)
-            col.plotly_chart(fig, width="stretch")
+            show(col, fig)
         st.caption("Option counts are contracts, not delta-weighted: a far out-of-the-money option counts the same "
                    "as an at-the-money one. Every long has a short somewhere, so the four groups' nets add to zero.")
 
@@ -315,10 +336,8 @@ def main():
                         line=dict(color="#2e86c1", width=2.6), secondary_y=True,
                         hovertemplate="%{y:+.2f}<extra>Medium</extra>")
         fig.update_layout(
-            title="NIFTY 50 (candles) with composite bias · drag a box to zoom, double-click to reset",
-            height=620, hovermode="x unified", dragmode="zoom", plot_bgcolor="white",
-            legend=dict(orientation="h", y=1.02, x=1, xanchor="right", yanchor="bottom"),
-            margin=dict(t=90))
+            title="NIFTY 50 (candles) with composite bias",
+            height=620, hovermode="x unified", dragmode="zoom", plot_bgcolor="white")
         fig.update_xaxes(
             rangebreaks=[dict(bounds=["sat", "mon"])], rangeslider=dict(visible=False),
             showspikes=True, spikemode="across", spikethickness=1, spikecolor="#7f8c8d",
@@ -330,7 +349,7 @@ def main():
         fig.update_yaxes(title="NIFTY 50", tickformat=",.0f", gridcolor="#eaeded", secondary_y=False)
         fig.update_yaxes(title="Composite (−2 … +2)", range=[-2.1, 2.1], fixedrange=True, showgrid=False,
                          tickvals=[-2, -1, -0.4, 0, 0.4, 1, 2], secondary_y=True)
-        st.plotly_chart(fig, width="stretch", config={"scrollZoom": True, "displaylogo": False})
+        show(st, fig, zoom=True)
         st.caption("Green/red candles = NIFTY up/down day (left scale). Blue = medium-term composite, orange = "
                    "short-term (right scale); background bands = strong bearish → strong bullish zones. "
                    "Drag a box over any period to magnify it (NIFTY rescales; composite scale stays −2…+2), "
@@ -411,12 +430,11 @@ def main():
                             hovertemplate="%{y:,.0f}<extra>NIFTY</extra>")
         fig.add_hline(y=0, line=dict(color="#95a5a6", width=1))
         fig.update_layout(title="FII NIFTY futures net ₹ crore (buy − sell) vs NIFTY spot", height=420,
-                          hovermode="x unified", bargap=0, dragmode="zoom",
-                          legend=dict(orientation="h", y=1.02, x=1, xanchor="right", yanchor="bottom"))
+                          hovermode="x unified", bargap=0, dragmode="zoom")
         fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
         fig.update_yaxes(title="₹ crore", tickformat=",.0f", secondary_y=False)
         fig.update_yaxes(title="NIFTY", tickformat=",.0f", showgrid=False, secondary_y=True)
-        st.plotly_chart(fig, width="stretch", config={"scrollZoom": True, "displaylogo": False})
+        show(st, fig, zoom=True)
         if m["E_day"].notna().sum() < len(m):
             st.caption("NSE's FII statistics split out NIFTY futures only from 31 Jan 2023; earlier sessions are blank.")
 
@@ -426,12 +444,11 @@ def main():
         if not nn.empty:
             fig.add_scatter(x=nn.index, y=nn, name="NIFTY spot", line=nifty_line, secondary_y=True,
                             hovertemplate="%{y:,.0f}<extra>NIFTY</extra>")
-        fig.update_layout(title="Who is long the index? (vs NIFTY spot)", height=400, hovermode="x unified",
-                          legend=dict(orientation="h", y=1.02, x=1, xanchor="right", yanchor="bottom"))
+        fig.update_layout(title="Who is long the index? (vs NIFTY spot)", height=400, hovermode="x unified")
         fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
         fig.update_yaxes(title="Long share %", secondary_y=False)
         fig.update_yaxes(title="NIFTY", tickformat=",.0f", showgrid=False, secondary_y=True)
-        st.plotly_chart(fig, width="stretch")
+        show(st, fig)
 
         fig = make_subplots(specs=[[{"secondary_y": True}]])
         fig.add_bar(x=m.index, y=m["A2"], name="FII net index futures",
@@ -442,12 +459,11 @@ def main():
             fig.add_scatter(x=nn.index, y=nn, name="NIFTY spot", line=dict(color="#1b4f72", width=2),
                             hovertemplate="%{y:,.0f}<extra>NIFTY</extra>", secondary_y=True)
         fig.update_layout(title="FII net index futures (contracts) vs NIFTY spot - contracts affected by "
-                                "lot-size changes", height=420, hovermode="x unified", bargap=0,
-                          legend=dict(orientation="h", y=1.08, x=1, xanchor="right"))
+                                "lot-size changes", height=420, hovermode="x unified", bargap=0)
         fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])  # hide weekend gaps
         fig.update_yaxes(title="Net contracts", tickformat=",.0f", secondary_y=False)
         fig.update_yaxes(title="NIFTY", tickformat=",.0f", showgrid=False, secondary_y=True)
-        st.plotly_chart(fig, width="stretch")
+        show(st, fig)
 
     # ---------------- TAB 4
     with tabs[3]:
@@ -483,7 +499,7 @@ def main():
                                 y=[r[f"avg {b:+d}"] for b in [-2, -1, 0, 1, 2]])
                 fig.update_layout(barmode="group", height=340, yaxis_title="avg forward return %", xaxis_type="category",
                                   title="A useful signal rises from −2 to +2")
-                st.plotly_chart(fig, width="stretch")
+                show(st, fig)
             st.info("How to read: **rank corr** above about +0.1 means higher scores were followed by better NIFTY "
                     "returns; near 0 means no edge; negative means the signal worked the opposite way. "
                     "Overlapping windows inflate apparent significance — treat results as indicative.")
