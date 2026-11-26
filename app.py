@@ -290,27 +290,51 @@ def main():
 
     # ---------------- TAB 3
     with tabs[2]:
-        # NIFTY on its own panel (top) so it is clearly visible; composites below on a shared date axis
-        fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.04, row_heights=[0.45, 0.55],
-                            subplot_titles=("NIFTY 50 spot (close)", "Composite bias (−2 … +2)"))
-        if not nifty.empty:
-            nn = nifty[nifty.index >= m.index.min()]
-            fig.add_scatter(x=nn.index, y=nn, name="NIFTY spot", line=dict(color="#1b4f72", width=2.4),
-                            fill="tozeroy", fillcolor="rgba(46,134,193,0.10)",
-                            hovertemplate="%{y:,.0f}<extra>NIFTY</extra>", row=1, col=1)
-            pad = (nn.max() - nn.min()) * 0.05
-            fig.update_yaxes(range=[nn.min() - pad, nn.max() + pad], tickformat=",.0f", row=1, col=1)
-        fig.add_scatter(x=short.index, y=short, name="Short-term composite",
-                        line=dict(color="#e67e22", width=1.3), opacity=0.85, row=2, col=1)
-        fig.add_scatter(x=med.index, y=med, name="Medium-term composite",
-                        line=dict(color="#2e86c1", width=2.4), row=2, col=1)
+        # One chart: NIFTY candles (left axis) with both composites overlaid (right axis, −2…+2 bands)
+        fig = make_subplots(specs=[[{"secondary_y": True}]])
+        hh = hist.set_index("date")
+        has_ohlc = all(c in hh.columns for c in ["NIFTY_O", "NIFTY_H", "NIFTY_L", "NIFTY"])
+        if has_ohlc and hh["NIFTY_O"].notna().any():
+            o = hh[["NIFTY_O", "NIFTY_H", "NIFTY_L", "NIFTY"]].dropna()
+            fig.add_trace(go.Candlestick(
+                x=o.index, open=o["NIFTY_O"], high=o["NIFTY_H"], low=o["NIFTY_L"], close=o["NIFTY"],
+                name="NIFTY 50", increasing=dict(line=dict(color="#1e8449", width=1), fillcolor="#27ae60"),
+                decreasing=dict(line=dict(color="#c0392b", width=1), fillcolor="#e74c3c"),
+                whiskerwidth=0.3), secondary_y=False)
+        elif not nifty.empty:
+            fig.add_scatter(x=nifty.index, y=nifty, name="NIFTY 50", line=dict(color="#1b4f72", width=2.2),
+                            secondary_y=False)
         for y0, y1, c in [(1, 2, "#82e0aa"), (0.4, 1, "#d5f5e3"), (-1, -0.4, "#fdebd0"), (-2, -1, "#f5b7b1")]:
-            fig.add_hrect(y0=y0, y1=y1, fillcolor=c, opacity=0.35, line_width=0, row=2, col=1)
-        fig.update_yaxes(range=[-2, 2], row=2, col=1)
-        fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
-        fig.update_layout(title="Composite bias history vs NIFTY", height=620, hovermode="x unified",
-                          legend=dict(orientation="h", y=1.07, x=1, xanchor="right"))
-        st.plotly_chart(fig, width="stretch")
+            fig.add_hrect(y0=y0, y1=y1, fillcolor=c, opacity=0.22, line_width=0, layer="below",
+                          secondary_y=True)
+        fig.add_hline(y=0, line=dict(color="#95a5a6", width=1, dash="dot"), secondary_y=True)
+        fig.add_scatter(x=short.index, y=short, name="Short-term composite",
+                        line=dict(color="#e67e22", width=1.2), opacity=0.75, secondary_y=True,
+                        hovertemplate="%{y:+.2f}<extra>Short</extra>")
+        fig.add_scatter(x=med.index, y=med, name="Medium-term composite",
+                        line=dict(color="#2e86c1", width=2.6), secondary_y=True,
+                        hovertemplate="%{y:+.2f}<extra>Medium</extra>")
+        fig.update_layout(
+            title="NIFTY 50 (candles) with composite bias · drag a box to zoom, double-click to reset",
+            height=620, hovermode="x unified", dragmode="zoom", plot_bgcolor="white",
+            legend=dict(orientation="h", y=1.02, x=1, xanchor="right", yanchor="bottom"),
+            margin=dict(t=90))
+        fig.update_xaxes(
+            rangebreaks=[dict(bounds=["sat", "mon"])], rangeslider=dict(visible=False),
+            showspikes=True, spikemode="across", spikethickness=1, spikecolor="#7f8c8d",
+            rangeselector=dict(buttons=[dict(count=1, label="1M", step="month", stepmode="backward"),
+                                        dict(count=3, label="3M", step="month", stepmode="backward"),
+                                        dict(count=6, label="6M", step="month", stepmode="backward"),
+                                        dict(count=1, label="1Y", step="year", stepmode="backward"),
+                                        dict(step="all", label="All")], x=0, y=1.02, yanchor="bottom"))
+        fig.update_yaxes(title="NIFTY 50", tickformat=",.0f", gridcolor="#eaeded", secondary_y=False)
+        fig.update_yaxes(title="Composite (−2 … +2)", range=[-2.1, 2.1], fixedrange=True, showgrid=False,
+                         tickvals=[-2, -1, -0.4, 0, 0.4, 1, 2], secondary_y=True)
+        st.plotly_chart(fig, width="stretch", config={"scrollZoom": True, "displaylogo": False})
+        st.caption("Green/red candles = NIFTY up/down day (left scale). Blue = medium-term composite, orange = "
+                   "short-term (right scale); background bands = strong bearish → strong bullish zones. "
+                   "Drag a box over any period to magnify it (NIFTY rescales; composite scale stays −2…+2), "
+                   "use the 1M–1Y buttons or the mouse wheel, and double-click to return to the full view.")
 
         with st.expander("📅 Date-wise check: did the earlier bias call NIFTY's move?", expanded=False):
             if nifty.empty:

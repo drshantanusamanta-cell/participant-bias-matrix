@@ -186,18 +186,16 @@ def history_info() -> dict:
 
 
 def add_nifty(hist: pd.DataFrame) -> tuple[pd.DataFrame, bool]:
-    """Fill the NIFTY close column for every stored session (Yahoo Finance)."""
+    """Fill NIFTY open/high/low/close for every stored session (Yahoo Finance)."""
     if hist.empty:
         return hist, False
-    n = fetch_nifty(hist["date"].min().date(), hist["date"].max().date())
-    if n.empty:
+    o = fetch_nifty_ohlc(hist["date"].min().date(), hist["date"].max().date())
+    if o.empty:
         return hist, False
     hist = hist.copy()
-    new = hist["date"].map(n)
-    if "NIFTY" in hist.columns:
-        hist["NIFTY"] = new.fillna(hist["NIFTY"])
-    else:
-        hist["NIFTY"] = new
+    for c in NIFTY_COLS.values():
+        new = hist["date"].map(o[c])
+        hist[c] = new.fillna(hist[c]) if c in hist.columns else new
     return hist, True
 
 
@@ -275,20 +273,29 @@ def records_from_uploads(files) -> pd.DataFrame:
     return pd.DataFrame(recs).sort_values("date").reset_index(drop=True) if recs else pd.DataFrame()
 
 
-def fetch_nifty(start: dt.date, end: dt.date) -> pd.Series:
+NIFTY_COLS = {"Open": "NIFTY_O", "High": "NIFTY_H", "Low": "NIFTY_L", "Close": "NIFTY"}
+
+
+def fetch_nifty_ohlc(start: dt.date, end: dt.date) -> pd.DataFrame:
+    """NIFTY 50 daily open/high/low/close from Yahoo Finance, columns NIFTY_O/H/L and NIFTY (close)."""
     try:
         import yfinance as yf
         d = yf.download("^NSEI", start=start, end=end + dt.timedelta(days=1),
                         progress=False, auto_adjust=False)
         if d.empty:
-            return pd.Series(dtype=float)
-        close = d["Close"]
-        if isinstance(close, pd.DataFrame):
-            close = close.iloc[:, 0]
-        close.index = pd.to_datetime(close.index).tz_localize(None).normalize()
-        return close.rename("NIFTY")
+            return pd.DataFrame()
+        out = pd.DataFrame(index=pd.to_datetime(d.index).tz_localize(None).normalize())
+        for src, dst in NIFTY_COLS.items():
+            col = d[src]
+            out[dst] = (col.iloc[:, 0] if isinstance(col, pd.DataFrame) else col).values
+        return out
     except Exception:
-        return pd.Series(dtype=float)
+        return pd.DataFrame()
+
+
+def fetch_nifty(start: dt.date, end: dt.date) -> pd.Series:
+    o = fetch_nifty_ohlc(start, end)
+    return o["NIFTY"] if not o.empty else pd.Series(dtype=float)
 
 
 # ----------------------------------------------------------------- metrics
