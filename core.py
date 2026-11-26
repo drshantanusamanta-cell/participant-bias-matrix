@@ -522,7 +522,8 @@ def backtest(sig: pd.DataFrame, nifty: pd.Series) -> dict:
             row["hit bull %"] = (bull.r > 0).mean() * 100 if len(bull) else np.nan
             row["hit bear %"] = (bear.r < 0).mean() * 100 if len(bear) else np.nan
             row["spread (bull−bear) %"] = (bull.r.mean() - bear.r.mean()) * 100 if len(bull) and len(bear) else np.nan
-            row["rank corr"] = df["s"].corr(df["r"], method="spearman")
+            # Spearman = Pearson on ranks (avoids needing scipy)
+            row["rank corr"] = df["s"].rank().corr(df["r"].rank())
             rows.append(row)
         res[hz] = pd.DataFrame(rows)
         res[hz + "_base"] = r.dropna().mean() * 100 if r.notna().any() else np.nan

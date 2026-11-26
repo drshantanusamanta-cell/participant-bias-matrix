@@ -332,8 +332,12 @@ def main():
         else:
             sig = sc.copy()
             sig["SHORT"], sig["MEDIUM"] = short, med
-            bt = core.backtest(sig, nifty)
-            for hz in ["short", "medium"]:
+            try:
+                bt = core.backtest(sig, nifty)
+            except Exception as e:
+                st.error(f"Backtest could not run: {e}")
+                bt = None
+            for hz in (["short", "medium"] if bt else []):
                 st.subheader(f"{hz.title()} term · average forward return of all sessions: "
                              f"{bt[hz + '_base']:.2f}%")
                 df = bt[hz]
