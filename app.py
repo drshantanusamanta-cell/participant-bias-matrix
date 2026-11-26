@@ -614,18 +614,19 @@ def main():
         pro_net = hh2["Pro_FIL"] - hh2["Pro_FIS"]
         comb = fii_net + pro_net
         fig = make_subplots(specs=[[{"secondary_y": True}]])
-        fig.add_bar(x=fii_net.index, y=fii_net, name="FII net", marker_color="#2e86c1", opacity=0.55,
-                    hovertemplate="%{y:,.0f}<extra>FII net</extra>")
-        fig.add_bar(x=pro_net.index, y=pro_net, name="Pro net", marker_color="#d68910", opacity=0.75,
-                    hovertemplate="%{y:,.0f}<extra>Pro net</extra>")
-        fig.add_scatter(x=comb.index, y=comb, name="FII + Pro net", line=dict(color="#1c2833", width=2.2),
+        fig.add_scatter(x=fii_net.index, y=fii_net, name="FII net", line=dict(color="#2e86c1", width=1.8),
+                        hovertemplate="%{y:,.0f}<extra>FII net</extra>")
+        fig.add_scatter(x=pro_net.index, y=pro_net, name="Pro net", line=dict(color="#d68910", width=1.8),
+                        hovertemplate="%{y:,.0f}<extra>Pro net</extra>")
+        fig.add_scatter(x=comb.index, y=comb, name="FII + Pro net",
+                        line=dict(color="#1c2833", width=2.4, dash="dot"),
                         hovertemplate="%{y:,.0f}<extra>FII + Pro</extra>")
         if not nifty.empty:
             nn = in_window(nifty[nifty.index >= m.index.min()], w4)
             fig.add_scatter(x=nn.index, y=nn, name="NIFTY spot", line=nifty_line, secondary_y=True,
                             hovertemplate="%{y:,.0f}<extra>NIFTY</extra>")
         fig.add_hline(y=0, line=dict(color="#95a5a6", width=1))
-        fig.update_layout(height=430, hovermode="x unified", barmode="overlay", bargap=0)
+        fig.update_layout(height=430, hovermode="x unified")
         fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
         fig.update_yaxes(title="Net contracts", tickformat=",.0f", secondary_y=False)
         fig.update_yaxes(title="NIFTY", tickformat=",.0f", showgrid=False, secondary_y=True)
@@ -641,14 +642,15 @@ def main():
                           "lot-size changes", "win_a2", last)
         mm = in_window(m, w3)
         fig = make_subplots(specs=[[{"secondary_y": True}]])
-        fig.add_bar(x=mm.index, y=mm["A2"], name="FII net index futures",
-                    marker_color=np.where(mm["A2"] >= 0, "#27ae60", "#c0392b"), opacity=0.75,
-                    hovertemplate="%{y:,.0f} contracts<extra>FII net</extra>")
+        fig.add_scatter(x=mm.index, y=mm["A2"], name="FII net index futures",
+                        line=dict(color="#c0392b", width=2),
+                        hovertemplate="%{y:,.0f} contracts<extra>FII net</extra>")
+        fig.add_hline(y=0, line=dict(color="#95a5a6", width=1))
         if not nifty.empty:
             nn = in_window(nifty[nifty.index >= m.index.min()], w3)
             fig.add_scatter(x=nn.index, y=nn, name="NIFTY spot", line=dict(color="#1b4f72", width=2),
                             hovertemplate="%{y:,.0f}<extra>NIFTY</extra>", secondary_y=True)
-        fig.update_layout(height=420, hovermode="x unified", bargap=0)
+        fig.update_layout(height=420, hovermode="x unified")
         fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])  # hide weekend gaps
         fig.update_yaxes(title="Net contracts", tickformat=",.0f", secondary_y=False)
         fig.update_yaxes(title="NIFTY", tickformat=",.0f", showgrid=False, secondary_y=True)
