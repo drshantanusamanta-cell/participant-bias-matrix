@@ -396,20 +396,42 @@ def main():
                     "worked the wrong way. NSE files come out after the close, so in practice you could act one "
                     "session later than T−lag.")
 
-        c1, c2 = st.columns(2)
-        fig = make_subplots(specs=[[{"secondary_y": True}]])
-        fig.add_scatter(x=m.index, y=m["A1"], name="FII long share %", line=dict(color="#2e86c1"))
-        fig.add_scatter(x=m.index, y=m["A5"], name="Client long share %", line=dict(color="#17a589", dash="dot"))
-        if not nifty.empty:
-            fig.add_scatter(x=nifty.index, y=nifty, name="NIFTY", line=dict(color="#bdc3c7"), secondary_y=True)
-        fig.update_layout(title="Who is long the index?", height=380, hovermode="x unified")
-        c1.plotly_chart(fig, width="stretch")
+        nn = nifty[nifty.index >= m.index.min()] if not nifty.empty else nifty
+        nifty_line = dict(color="#7d3c98", width=2.2)
 
+        fig = make_subplots(specs=[[{"secondary_y": True}]])
         e = m["E_day"].dropna()
-        fig = go.Figure(go.Bar(x=e.index, y=e, marker_color=np.where(e >= 0, "#27ae60", "#c0392b"), name="Daily"))
-        fig.add_scatter(x=m.index, y=m["E2_20"], name="20-session sum", line=dict(color="#2c3e50"))
-        fig.update_layout(title="FII NIFTY futures net ₹ crore (buy − sell)", height=380, hovermode="x unified")
-        c2.plotly_chart(fig, width="stretch")
+        fig.add_bar(x=e.index, y=e, name="FII NIFTY futures net ₹ cr (daily)",
+                    marker_color=np.where(e >= 0, "#27ae60", "#c0392b"), opacity=0.8,
+                    hovertemplate="₹%{y:,.0f} cr<extra>Daily</extra>")
+        fig.add_scatter(x=m.index, y=m["E2_20"], name="20-session sum", line=dict(color="#2c3e50", width=2),
+                        hovertemplate="₹%{y:,.0f} cr<extra>20-session</extra>")
+        if not nn.empty:
+            fig.add_scatter(x=nn.index, y=nn, name="NIFTY spot", line=nifty_line, secondary_y=True,
+                            hovertemplate="%{y:,.0f}<extra>NIFTY</extra>")
+        fig.add_hline(y=0, line=dict(color="#95a5a6", width=1))
+        fig.update_layout(title="FII NIFTY futures net ₹ crore (buy − sell) vs NIFTY spot", height=420,
+                          hovermode="x unified", bargap=0, dragmode="zoom",
+                          legend=dict(orientation="h", y=1.02, x=1, xanchor="right", yanchor="bottom"))
+        fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
+        fig.update_yaxes(title="₹ crore", tickformat=",.0f", secondary_y=False)
+        fig.update_yaxes(title="NIFTY", tickformat=",.0f", showgrid=False, secondary_y=True)
+        st.plotly_chart(fig, width="stretch", config={"scrollZoom": True, "displaylogo": False})
+        if m["E_day"].notna().sum() < len(m):
+            st.caption("NSE's FII statistics split out NIFTY futures only from 31 Jan 2023; earlier sessions are blank.")
+
+        fig = make_subplots(specs=[[{"secondary_y": True}]])
+        fig.add_scatter(x=m.index, y=m["A1"], name="FII long share %", line=dict(color="#2e86c1", width=2))
+        fig.add_scatter(x=m.index, y=m["A5"], name="Client long share %", line=dict(color="#17a589", dash="dot"))
+        if not nn.empty:
+            fig.add_scatter(x=nn.index, y=nn, name="NIFTY spot", line=nifty_line, secondary_y=True,
+                            hovertemplate="%{y:,.0f}<extra>NIFTY</extra>")
+        fig.update_layout(title="Who is long the index? (vs NIFTY spot)", height=400, hovermode="x unified",
+                          legend=dict(orientation="h", y=1.02, x=1, xanchor="right", yanchor="bottom"))
+        fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
+        fig.update_yaxes(title="Long share %", secondary_y=False)
+        fig.update_yaxes(title="NIFTY", tickformat=",.0f", showgrid=False, secondary_y=True)
+        st.plotly_chart(fig, width="stretch")
 
         fig = make_subplots(specs=[[{"secondary_y": True}]])
         fig.add_bar(x=m.index, y=m["A2"], name="FII net index futures",
