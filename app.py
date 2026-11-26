@@ -523,7 +523,15 @@ def main():
             st.caption("NSE's FII statistics split out NIFTY futures only from 31 Jan 2023; earlier sessions are blank.")
 
         w2 = chart_header("Who is long the index? (vs NIFTY spot)", "win_long", last)
+        k1, k2, k3 = st.columns([1, 1, 2])
+        dv_n = k1.number_input("Change over (sessions)", 1, 10, 3, key="dv_n",
+                               help="How many sessions back to measure each group's change in long share.")
+        dv_t = k2.number_input("Minimum change (% points)", 0.5, 10.0, 3.0, step=0.5, key="dv_t",
+                               help="Both groups must move at least this much, in opposite directions.")
+        dv_all = k3.toggle("Mark every day (not just the first day of each run)", False, key="dv_all")
+        dv = core.fii_client_divergence(m, int(dv_n), float(dv_t))
         mm = in_window(m, w2)
+        dvw = in_window(dv, w2)
         nn = in_window(nifty[nifty.index >= m.index.min()], w2) if not nifty.empty else nifty
         fig = make_subplots(specs=[[{"secondary_y": True}]])
         fig.add_scatter(x=mm.index, y=mm["A1"], name="FII long share %", line=dict(color="#2e86c1", width=2))
@@ -531,11 +539,56 @@ def main():
         if not nn.empty:
             fig.add_scatter(x=nn.index, y=nn, name="NIFTY spot", line=nifty_line, secondary_y=True,
                             hovertemplate="%{y:,.0f}<extra>NIFTY</extra>")
-        fig.update_layout(height=400, hovermode="x unified")
+        for col, lab, sym, colr in [("bull", "FII adding longs · Clients cutting", "triangle-up", "#1e8449"),
+                                    ("bear", "FII cutting longs · Clients adding", "triangle-down", "#c0392b")]:
+            idx = dvw.index[dvw[col] if dv_all else dvw[col + "_start"]]
+            if len(idx):
+                fig.add_scatter(
+                    x=idx, y=mm.loc[idx, "A1"], mode="markers", name=lab,
+                    marker=dict(symbol=sym, size=12, color=colr, line=dict(color="white", width=1)),
+                    customdata=np.stack([dvw.loc[idx, "dFII"], dvw.loc[idx, "dClient"]], axis=1),
+                    hovertemplate="FII %{customdata[0]:+.1f} pts · Client %{customdata[1]:+.1f} pts"
+                                  f"<extra>{'▲' if col == 'bull' else '▼'}</extra>")
+        fig.update_layout(height=430, hovermode="x unified")
         fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
         fig.update_yaxes(title="Long share %", secondary_y=False)
         fig.update_yaxes(title="NIFTY", tickformat=",.0f", showgrid=False, secondary_y=True)
         show(st, fig)
+        nb, nr = int(dvw["bull_start"].sum()), int(dvw["bear_start"].sum())
+        st.caption(f"▲ green = FII long share up and Client long share down by ≥{dv_t:g} pts over {dv_n} "
+                   f"sessions ({nb} episodes in view); ▼ red = the reverse ({nr} episodes). Tested on 12 years "
+                   "of data (default settings), these marks describe what just happened: NIFTY had risen over the "
+                   "same 3 sessions in about 4 of 5 ▲ cases and fallen in about 7 of 10 ▼ cases. They did not "
+                   "predict the next 5–20 sessions, where NIFTY rose about as often as it normally does.")
+
+        w4 = chart_header("Net index futures: FII, Pro and FII + Pro combined (vs NIFTY spot)", "win_fp", last)
+        hh2 = in_window(hist.set_index("date"), w4)
+        fii_net = hh2["FII_FIL"] - hh2["FII_FIS"]
+        pro_net = hh2["Pro_FIL"] - hh2["Pro_FIS"]
+        comb = fii_net + pro_net
+        fig = make_subplots(specs=[[{"secondary_y": True}]])
+        fig.add_bar(x=fii_net.index, y=fii_net, name="FII net", marker_color="#2e86c1", opacity=0.55,
+                    hovertemplate="%{y:,.0f}<extra>FII net</extra>")
+        fig.add_bar(x=pro_net.index, y=pro_net, name="Pro net", marker_color="#d68910", opacity=0.75,
+                    hovertemplate="%{y:,.0f}<extra>Pro net</extra>")
+        fig.add_scatter(x=comb.index, y=comb, name="FII + Pro net", line=dict(color="#1c2833", width=2.2),
+                        hovertemplate="%{y:,.0f}<extra>FII + Pro</extra>")
+        if not nifty.empty:
+            nn = in_window(nifty[nifty.index >= m.index.min()], w4)
+            fig.add_scatter(x=nn.index, y=nn, name="NIFTY spot", line=nifty_line, secondary_y=True,
+                            hovertemplate="%{y:,.0f}<extra>NIFTY</extra>")
+        fig.add_hline(y=0, line=dict(color="#95a5a6", width=1))
+        fig.update_layout(height=430, hovermode="x unified", barmode="overlay", bargap=0)
+        fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
+        fig.update_yaxes(title="Net contracts", tickformat=",.0f", secondary_y=False)
+        fig.update_yaxes(title="NIFTY", tickformat=",.0f", showgrid=False, secondary_y=True)
+        show(st, fig)
+        st.caption("Net = long − short index-futures contracts. FII + Pro is the mirror image of Client + DII "
+                   "(all four groups add up to zero). Over 12 years Pro desks often took the other side of FIIs "
+                   "day to day, so combining them partly cancels out and did not forecast NIFTY better than FII "
+                   "alone. One modest pattern held in both 2015–20 and 2021–26: when Pro desks built net longs over "
+                   "20 sessions, NIFTY tended to do slightly worse over the next 20 (and vice versa). Treat it as "
+                   "context, not a signal. Contract counts jump when lot sizes change.")
 
         w3 = chart_header("FII net index futures (contracts) vs NIFTY spot - contracts affected by "
                           "lot-size changes", "win_a2", last)

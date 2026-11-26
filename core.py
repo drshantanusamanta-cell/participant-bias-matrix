@@ -597,3 +597,16 @@ def save_settings(cfg: dict) -> str:
     with open(SETTINGS_FILE, "w") as f:
         f.write(txt)
     return txt
+
+
+# ----------------------------------------------------------------- FII vs Client divergence
+def fii_client_divergence(m: pd.DataFrame, lookback: int = 3, thr: float = 3.0) -> pd.DataFrame:
+    """Days when FII long share and Client long share move in opposite directions by more than `thr`
+    percentage points over `lookback` sessions. 'start' marks only the first day of each run."""
+    d1, d5 = m["A1"].diff(lookback), m["A5"].diff(lookback)
+    bull = (d1 > thr) & (d5 < -thr)   # FII adding longs, clients cutting longs
+    bear = (d1 < -thr) & (d5 > thr)   # FII cutting longs, clients adding longs
+    out = pd.DataFrame({"bull": bull, "bear": bear, "dFII": d1, "dClient": d5})
+    out["bull_start"] = bull & ~bull.shift(1, fill_value=False)
+    out["bear_start"] = bear & ~bear.shift(1, fill_value=False)
+    return out
