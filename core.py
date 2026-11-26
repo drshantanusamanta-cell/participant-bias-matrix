@@ -567,3 +567,33 @@ def hit_rate(col: pd.Series) -> tuple[float, int]:
     called = col.isin(["✓", "✗"])
     n = int(called.sum())
     return ((col[called] == "✓").mean() * 100 if n else np.nan), n
+
+
+# ----------------------------------------------------------------- saved default settings
+SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
+
+
+def load_settings() -> dict:
+    """Defaults every visitor sees; the owner can overwrite them from the app."""
+    import json
+    base = {"years": 2, "window": 252,
+            "short": dict(DEFAULT_WEIGHTS["short"]), "medium": dict(DEFAULT_WEIGHTS["medium"])}
+    try:
+        with open(SETTINGS_FILE) as f:
+            saved = json.load(f)
+        base["years"] = saved.get("years", base["years"])
+        base["window"] = saved.get("window", base["window"])
+        for hz in ("short", "medium"):
+            base[hz].update({k: v for k, v in saved.get(hz, {}).items() if k in base[hz]})
+    except (OSError, ValueError):
+        pass
+    return base
+
+
+def save_settings(cfg: dict) -> str:
+    import json
+    os.makedirs(DATA_DIR, exist_ok=True)
+    txt = json.dumps(cfg, indent=2)
+    with open(SETTINGS_FILE, "w") as f:
+        f.write(txt)
+    return txt

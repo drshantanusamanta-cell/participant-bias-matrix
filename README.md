@@ -28,7 +28,28 @@ No API keys are needed.
 * `https://nsearchives.nseindia.com/content/fo/fii_stats_DD-Mon-YYYY.xls`
 * NIFTY 50 close from Yahoo Finance (`^NSEI`) — charts and backtest only
 
-**Data fetching is manual.** The app only reads the saved `data/history.csv`; it makes no network calls
+## Owner mode (password-protected)
+
+Visitors get **view-only** access: they see every tab and chart, using the default settings saved by the owner.
+Fetching data, backfilling, uploading files, downloading `history.csv` and changing the analysis settings
+are available only after **🔒 Owner login** in the sidebar.
+
+Set the password once (it is **not** stored in the code or in GitHub):
+
+1. On share.streamlit.io open the app → **⋮ → Settings → Secrets**.
+2. Paste the line below (with your own password) and click **Save**:
+   ```toml
+   OWNER_PASSWORD = "choose-a-strong-password"
+   ```
+3. To run locally, put the same line in `.streamlit/secrets.toml` (already ignored by git).
+
+Without that secret, owner tools stay disabled. Five wrong passwords lock the login until the page is reloaded.
+
+As owner, **💾 Save as default for visitors** stores the current settings in `data/settings.json`.
+Download it (**⬇️ Download settings.json**) and upload it to GitHub as `data/settings.json` so the
+defaults survive app restarts.
+
+**Data fetching is manual (owner only).** The app only reads the saved `data/history.csv`; it makes no network calls
 until you press **📥 Fetch new days from NSE** in the sidebar. That button downloads the trading days after
 the last stored session (NSE publishes after ~7 PM IST), adds NIFTY closes, and saves them to the CSV.
 

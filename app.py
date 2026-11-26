@@ -7,6 +7,8 @@ short-term (1-5 sessions) and medium-term (2-6 weeks) NIFTY bias.
 © Dr Shantanu Samanta. For education and research only - not investment advice.
 """
 import datetime as dt
+import hmac
+import os
 
 import numpy as np
 import pandas as pd
@@ -156,17 +158,63 @@ def cross_matrix(short_b, med_b):
 
 
 # ----------------------------------------------------------------- sidebar
+def owner_password() -> str:
+    try:
+        return str(st.secrets.get("OWNER_PASSWORD", ""))
+    except Exception:  # no secrets file at all
+        return ""
+
+
+def owner_login() -> bool:
+    """Owner login in the sidebar. The password lives in Streamlit secrets (OWNER_PASSWORD), never in the code."""
+    if st.session_state.get("is_owner"):
+        if st.sidebar.button("🔓 Log out of owner mode", width="stretch"):
+            st.session_state["is_owner"] = False
+            st.rerun()
+        return True
+    with st.sidebar.expander("🔒 Owner login"):
+        pw = owner_password()
+        if not pw:
+            st.caption("Owner tools are disabled: no OWNER_PASSWORD is set in the app's Secrets.")
+            return False
+        tries = st.session_state.get("login_tries", 0)
+        if tries >= 5:
+            st.error("Too many wrong attempts. Reload the page to try again.")
+            return False
+        with st.form("owner_login", clear_on_submit=True, border=False):
+            entered = st.text_input("Password", type="password")
+            ok = st.form_submit_button("Log in", width="stretch")
+        if ok:
+            if hmac.compare_digest(entered.encode(), pw.encode()):
+                st.session_state["is_owner"] = True
+                st.session_state["login_tries"] = 0
+                st.rerun()
+            else:
+                st.session_state["login_tries"] = tries + 1
+                st.error("Wrong password.")
+    return False
+
+
 def sidebar():
     info = core.history_info()
-    st.sidebar.header("📁 Data (saved CSV)")
+    cfg = core.load_settings()
+    st.sidebar.header("📁 Data")
     if info["n"]:
         st.sidebar.markdown(f"**{info['n']:,} sessions** stored  \n{info['first']:%d %b %Y} → "
                             f"**{info['last']:%d %b %Y}**")
     else:
-        st.sidebar.warning("No data saved yet - press Fetch.")
+        st.sidebar.warning("No data saved yet.")
+
+    owner = owner_login()
+    if not owner:
+        st.sidebar.caption("View-only. Data updates and analysis settings are managed by the owner.")
+        return info, cfg["years"], cfg["window"], cfg["short"], cfg["medium"], False
+
+    # ---------------- owner tools
+    st.sidebar.success("Owner mode")
     if st.sidebar.button("📥 Fetch new days from NSE", type="primary", width="stretch",
                          help="Downloads only the trading days after the last stored session, "
-                              "adds NIFTY closes, and saves to data/history.csv."):
+                              "adds NIFTY prices, and saves to data/history.csv."):
         run_fetch()
     with st.sidebar.expander("Backfill / re-fetch a date range"):
         c1, c2 = st.columns(2)
@@ -187,22 +235,36 @@ def sidebar():
             n = core.merge_into_history(core.records_from_uploads(files))
             st.session_state["fetch_msg"] = ("success", f"Merged files: {n} new session(s) added.")
             st.rerun()
-    st.sidebar.caption("On Streamlit Cloud the saved CSV resets when the app restarts. After fetching, "
+    st.sidebar.caption("On Streamlit Cloud the saved files reset when the app restarts. After fetching, "
                        "download history.csv and replace data/history.csv in GitHub to keep it.")
 
     st.sidebar.header("⚙️ Analysis settings")
-    years = st.sidebar.select_slider("History to analyse", options=[1.5, 2, 3, 5, 8, 11], value=2,
+    years_opts = [1.5, 2, 3, 5, 8, 11]
+    years = st.sidebar.select_slider("History to analyse", options=years_opts,
+                                     value=cfg["years"] if cfg["years"] in years_opts else 2,
                                      format_func=lambda y: f"{y} years",
                                      help="Counted back from the latest stored session.")
-    window = st.sidebar.select_slider("Percentile look-back (sessions)", options=[126, 189, 252, 504], value=252)
+    win_opts = [126, 189, 252, 504]
+    window = st.sidebar.select_slider("Percentile look-back (sessions)", options=win_opts,
+                                      value=cfg["window"] if cfg["window"] in win_opts else 252)
     with st.sidebar.expander("Short-term weights"):
-        ws = {k: st.slider(core.METRIC_INFO[k][0], 0, 50, v, 5, key=f"s_{k}")
-              for k, v in core.DEFAULT_WEIGHTS["short"].items()}
+        ws = {k: st.slider(core.METRIC_INFO[k][0], 0, 100, int(v), 5, key=f"s_{k}")
+              for k, v in cfg["short"].items()}
     with st.sidebar.expander("Medium-term weights"):
-        wm = {k: st.slider(core.METRIC_INFO[k][0], 0, 50, v, 5, key=f"m_{k}")
-              for k, v in core.DEFAULT_WEIGHTS["medium"].items()}
-    st.sidebar.caption("Weights are starting guesses - check the Backtest tab before trusting them.")
-    return info, years, window, ws, wm
+        wm = {k: st.slider(core.METRIC_INFO[k][0], 0, 100, int(v), 5, key=f"m_{k}")
+              for k, v in cfg["medium"].items()}
+    st.sidebar.caption("Changes apply to your session. Save them to make them what visitors see.")
+    if st.sidebar.button("💾 Save as default for visitors", width="stretch"):
+        txt = core.save_settings({"years": years, "window": window, "short": ws, "medium": wm})
+        st.session_state["settings_json"] = txt
+        st.session_state["fetch_msg"] = ("success", "Saved. Visitors now see these settings.")
+        st.rerun()
+    if os.path.exists(core.SETTINGS_FILE):
+        with open(core.SETTINGS_FILE, "rb") as f:
+            st.sidebar.download_button("⬇️ Download settings.json", f.read(), "settings.json",
+                                       "application/json", width="stretch",
+                                       help="Upload to GitHub as data/settings.json so the defaults survive restarts.")
+    return info, years, window, ws, wm, True
 
 
 # ----------------------------------------------------------------- main
@@ -210,15 +272,16 @@ def main():
     st.title("🧭 Participant F&O Bias Matrix")
     st.caption("NIFTY short-term (1–5 sessions) and medium-term (2–6 weeks) bias from NSE participant-wise "
                "F&O positions and FII derivatives statistics. Education and research only — not investment advice.")
-    info, years, window, ws, wm = sidebar()
+    info, years, window, ws, wm, owner = sidebar()
 
     msg = st.session_state.pop("fetch_msg", None)
     if msg:
         (st.success if msg[0] == "success" else st.error)(msg[1])
 
     if not info["n"]:
-        st.info("No saved data yet. Press **📥 Fetch new days from NSE** in the sidebar "
-                "(or add files under 'Add data from files').")
+        st.info("No saved data yet. Log in as owner and press **📥 Fetch new days from NSE**." if not owner
+                else "No saved data yet. Press **📥 Fetch new days from NSE** in the sidebar "
+                     "(or add files under 'Add data from files').")
         return
     full = load_history(info["mtime"])
     start = full["date"].max() - pd.Timedelta(days=int(years * 365.25))
@@ -227,7 +290,7 @@ def main():
         st.error("Fewer than 30 sessions saved - fetch or add more data.")
         return
     stale = (pd.Timestamp(dt.date.today()) - full["date"].max()).days
-    if stale > 3:
+    if stale > 3 and owner:
         st.warning(f"Saved data ends {full['date'].max():%d %b %Y} ({stale} days ago). "
                    "Press **📥 Fetch new days from NSE** to update.")
 
@@ -541,8 +604,9 @@ def main():
             st.dataframe(bad[["issues"]])
         st.download_button("⬇️ Download metrics (CSV)", m.join(sc, rsuffix="_score").to_csv().encode(),
                            "participant_bias_metrics.csv", "text/csv")
-        st.download_button("⬇️ Download raw NSE history (CSV)", hist.to_csv(index=False).encode(),
-                           "participant_raw_history.csv", "text/csv")
+        if owner:
+            st.download_button("⬇️ Download raw NSE history (CSV)", hist.to_csv(index=False).encode(),
+                               "participant_raw_history.csv", "text/csv")
         st.markdown("""
 **Sources** — NSE archives: `fao_participant_oi_DDMMYYYY.csv`, `fao_participant_vol_DDMMYYYY.csv`,
 `fii_stats_DD-Mon-YYYY.xls`; NIFTY close from Yahoo Finance (^NSEI).
