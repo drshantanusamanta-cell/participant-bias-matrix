@@ -528,3 +528,35 @@ def backtest(sig: pd.DataFrame, nifty: pd.Series) -> dict:
         res[hz] = pd.DataFrame(rows)
         res[hz + "_base"] = r.dropna().mean() * 100 if r.notna().any() else np.nan
     return res
+
+
+# ----------------------------------------------------------------- date-wise lag check
+def lag_check(short: pd.Series, med: pd.Series, nifty: pd.Series, s_lag: int = 5, m_lag: int = 20,
+              window: int = 60, band: float = 0.4) -> pd.DataFrame:
+    """For each session T: NIFTY close, the composite from `lag` sessions earlier, NIFTY's % move since
+    then, whether the earlier bias called the direction, and the rolling correlation (%) between the
+    lagged composite and the subsequent NIFTY move over the last `window` sessions."""
+    px = nifty.reindex(short.index).ffill()
+    out = pd.DataFrame({"NIFTY close": px})
+    for tag, comp, lag in [("Short", short, s_lag), ("Medium", med, m_lag)]:
+        past = comp.shift(lag)
+        move = (px / px.shift(lag) - 1) * 100
+        bias = past.apply(lambda v: np.nan if pd.isna(v) else ("Bullish" if v >= band else
+                                                               "Bearish" if v <= -band else "Neutral"))
+        hit = pd.Series(np.nan, index=comp.index, dtype=object)
+        called = bias.isin(["Bullish", "Bearish"]) & move.notna()
+        hit[called] = np.where((bias[called] == "Bullish") == (move[called] > 0), "✓", "✗")
+        hit[bias.eq("Neutral") & move.notna()] = "–"
+        corr = past.rolling(window, min_periods=max(10, window // 2)).corr(move) * 100
+        out[f"{tag} composite (T−{lag})"] = past
+        out[f"{tag} bias (T−{lag})"] = bias
+        out[f"NIFTY % move T−{lag}→T"] = move
+        out[f"{tag} call"] = hit
+        out[f"{tag} rolling corr % ({window})"] = corr
+    return out
+
+
+def hit_rate(col: pd.Series) -> tuple[float, int]:
+    called = col.isin(["✓", "✗"])
+    n = int(called.sum())
+    return ((col[called] == "✓").mean() * 100 if n else np.nan), n

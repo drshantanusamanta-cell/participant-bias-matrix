@@ -290,17 +290,87 @@ def main():
 
     # ---------------- TAB 3
     with tabs[2]:
-        fig = make_subplots(specs=[[{"secondary_y": True}]])
-        fig.add_scatter(x=short.index, y=short, name="Short-term composite", line=dict(color="#e67e22"))
-        fig.add_scatter(x=med.index, y=med, name="Medium-term composite", line=dict(color="#2e86c1", width=2.5))
+        # NIFTY on its own panel (top) so it is clearly visible; composites below on a shared date axis
+        fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.04, row_heights=[0.45, 0.55],
+                            subplot_titles=("NIFTY 50 spot (close)", "Composite bias (−2 … +2)"))
         if not nifty.empty:
-            fig.add_scatter(x=nifty.index, y=nifty, name="NIFTY", line=dict(color="#7f8c8d", width=1),
-                            secondary_y=True)
+            nn = nifty[nifty.index >= m.index.min()]
+            fig.add_scatter(x=nn.index, y=nn, name="NIFTY spot", line=dict(color="#1b4f72", width=2.4),
+                            fill="tozeroy", fillcolor="rgba(46,134,193,0.10)",
+                            hovertemplate="%{y:,.0f}<extra>NIFTY</extra>", row=1, col=1)
+            pad = (nn.max() - nn.min()) * 0.05
+            fig.update_yaxes(range=[nn.min() - pad, nn.max() + pad], tickformat=",.0f", row=1, col=1)
+        fig.add_scatter(x=short.index, y=short, name="Short-term composite",
+                        line=dict(color="#e67e22", width=1.3), opacity=0.85, row=2, col=1)
+        fig.add_scatter(x=med.index, y=med, name="Medium-term composite",
+                        line=dict(color="#2e86c1", width=2.4), row=2, col=1)
         for y0, y1, c in [(1, 2, "#82e0aa"), (0.4, 1, "#d5f5e3"), (-1, -0.4, "#fdebd0"), (-2, -1, "#f5b7b1")]:
-            fig.add_hrect(y0=y0, y1=y1, fillcolor=c, opacity=0.35, line_width=0)
-        fig.update_layout(title="Composite bias history vs NIFTY", height=430, hovermode="x unified")
-        fig.update_yaxes(range=[-2, 2], title="Composite", secondary_y=False)
+            fig.add_hrect(y0=y0, y1=y1, fillcolor=c, opacity=0.35, line_width=0, row=2, col=1)
+        fig.update_yaxes(range=[-2, 2], row=2, col=1)
+        fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
+        fig.update_layout(title="Composite bias history vs NIFTY", height=620, hovermode="x unified",
+                          legend=dict(orientation="h", y=1.07, x=1, xanchor="right"))
         st.plotly_chart(fig, width="stretch")
+
+        with st.expander("📅 Date-wise check: did the earlier bias call NIFTY's move?", expanded=False):
+            if nifty.empty:
+                st.warning("NIFTY closes are missing from the saved data - press Fetch to add them.")
+            else:
+                k1, k2, k3, k4, k5 = st.columns(5)
+                s_lag = k1.number_input("Short-term lag (sessions)", 1, 30, 5, key="lag_s")
+                m_lag = k2.number_input("Medium-term lag (sessions)", 5, 90, 20, key="lag_m")
+                win = k3.number_input("Rolling correlation window", 20, 504, 60, step=10, key="lag_w")
+                band = k4.number_input("Neutral band (±)", 0.0, 1.5, 0.4, step=0.1, key="lag_b")
+                rows = k5.number_input("Sessions to show", 10, len(m), min(60, len(m)), step=10, key="lag_r")
+                lc = core.lag_check(short, med, nifty, int(s_lag), int(m_lag), int(win), float(band))
+                view = lc.iloc[::-1].head(int(rows)).copy()
+                view.index = view.index.strftime("%a %d %b %Y")
+                view.index.name = "Date"
+
+                hs, ns = core.hit_rate(view["Short call"])
+                hm, nm = core.hit_rate(view["Medium call"])
+                cs = view[f"Short rolling corr % ({int(win)})"].iloc[0]
+                cm = view[f"Medium rolling corr % ({int(win)})"].iloc[0]
+                q1, q2, q3, q4 = st.columns(4)
+                q1.metric(f"Short-term hit rate ({ns} calls)", "–" if pd.isna(hs) else f"{hs:.0f}%")
+                q2.metric(f"Short-term correlation, last {int(win)}", "–" if pd.isna(cs) else f"{cs:+.0f}%")
+                q3.metric(f"Medium-term hit rate ({nm} calls)", "–" if pd.isna(hm) else f"{hm:.0f}%")
+                q4.metric(f"Medium-term correlation, last {int(win)}", "–" if pd.isna(cm) else f"{cm:+.0f}%")
+
+                corr_cols = [c for c in view.columns if "rolling corr" in c]
+                num_cols = [c for c in view.columns if c not in corr_cols and view[c].dtype.kind == "f"]
+
+                def colour_call(v):
+                    return {"✓": "background-color:#abebc6", "✗": "background-color:#f5b7b1"}.get(v, "")
+
+                def colour_bias(v):
+                    return {"Bullish": "color:#1e8449;font-weight:600",
+                            "Bearish": "color:#c0392b;font-weight:600"}.get(v, "color:#7f8c8d")
+
+                def colour_move(v):
+                    return "" if pd.isna(v) else ("color:#1e8449" if v > 0 else "color:#c0392b")
+
+                sty = (view.style
+                       .format("{:,.2f}", subset=num_cols, na_rep="–")
+                       .format("{:,.0f}", subset=["NIFTY close"], na_rep="–")
+                       .format("{:+.0f}%", subset=corr_cols, na_rep="–")
+                       .format("{:+.2f}%", subset=[c for c in view.columns if c.startswith("NIFTY % move")],
+                               na_rep="–")
+                       .map(colour_call, subset=["Short call", "Medium call"])
+                       .map(colour_bias, subset=[c for c in view.columns if " bias " in c])
+                       .map(colour_move, subset=[c for c in view.columns if c.startswith("NIFTY % move")])
+                       .background_gradient(subset=corr_cols, cmap="RdYlGn", vmin=-60, vmax=60))
+                st.dataframe(sty, width="stretch", height=460)
+                st.download_button("⬇️ Download this table (CSV)", lc.iloc[::-1].to_csv().encode(),
+                                   "nifty_vs_composite_check.csv", "text/csv")
+                st.caption(
+                    "Each row is a trading day T. **Composite (T−lag)** is the reading that many sessions earlier; "
+                    "**NIFTY % move** is the change in NIFTY close from T−lag to T. **Call** = ✓ when a bullish/bearish "
+                    "reading was followed by a NIFTY move in the same direction, ✗ when opposite, – when the reading "
+                    "was inside the neutral band. **Rolling corr %** = correlation (×100) between the lagged composite "
+                    "and the following NIFTY move over the last N sessions: +100% perfect, 0% none, negative = "
+                    "worked the wrong way. NSE files come out after the close, so in practice you could act one "
+                    "session later than T−lag.")
 
         c1, c2 = st.columns(2)
         fig = make_subplots(specs=[[{"secondary_y": True}]])
