@@ -500,6 +500,15 @@ def main():
         nifty_line = dict(color="#7d3c98", width=2.2)
 
         w1 = chart_header("FII NIFTY futures net ₹ crore (buy − sell) vs NIFTY spot", "win_e", last)
+        f1, f2, f3, f4 = st.columns([1.4, 1, 1, 1])
+        fs_mode = f1.selectbox("Signal", ["20-session sum turns", "20-session sum crosses zero"], key="fs_mode",
+                               help="Turns: the 20-session sum rises/falls by more than the buffer over the "
+                                    "chosen number of sessions. Crosses zero: it moves above +buffer / below −buffer.")
+        turn = fs_mode.endswith("turns")
+        fs_n = f2.number_input("Over (sessions)", 3, 30, 10, key="fs_n", disabled=not turn)
+        fs_buf = f3.number_input("Buffer (₹ cr)", 0, 20000, 2000, step=500, key="fs_buf")
+        fs_h = f4.number_input("Check NIFTY after (sessions)", 5, 60, 20, step=5, key="fs_h")
+        fsig = core.flow_signal(m["E2_20"], "turn" if turn else "cross", int(fs_n), float(fs_buf))
         mm = in_window(m, w1)
         nn = in_window(nifty[nifty.index >= m.index.min()], w1) if not nifty.empty else nifty
         fig = make_subplots(specs=[[{"secondary_y": True}]])
@@ -512,6 +521,19 @@ def main():
         if not nn.empty:
             fig.add_scatter(x=nn.index, y=nn, name="NIFTY spot", line=nifty_line, secondary_y=True,
                             hovertemplate="%{y:,.0f}<extra>NIFTY</extra>")
+        fsw = in_window(fsig, w1)
+        for col, lab, sym, colr in [("bull_start", "FII ₹ flow turning up", "triangle-up", "#1e8449"),
+                                    ("bear_start", "FII ₹ flow turning down", "triangle-down", "#c0392b")]:
+            idx = fsw.index[fsw[col]]
+            if not nn.empty:
+                idx = idx[idx.isin(nn.index)]
+            if len(idx) and not nn.empty:
+                fig.add_scatter(x=idx, y=nn.loc[idx], mode="markers", name=lab, secondary_y=True,
+                                marker=dict(symbol=sym, size=13, color=colr, line=dict(color="white", width=1)),
+                                customdata=np.stack([mm.loc[idx, "E2_20"], fsw.loc[idx, "driver"]], axis=1),
+                                hovertemplate="20-session sum ₹%{customdata[0]:,.0f} cr · "
+                                              + ("change ₹%{customdata[1]:+,.0f} cr" if turn else "")
+                                              + f"<extra>{'▲' if col == 'bull_start' else '▼'}</extra>")
         fig.add_hline(y=0, line=dict(color="#95a5a6", width=1))
         fig.update_layout(height=420,
                           hovermode="x unified", bargap=0, dragmode="zoom")
@@ -519,8 +541,31 @@ def main():
         fig.update_yaxes(title="₹ crore", tickformat=",.0f", secondary_y=False)
         fig.update_yaxes(title="NIFTY", tickformat=",.0f", showgrid=False, secondary_y=True)
         show(st, fig, zoom=True)
-        if mm["E_day"].notna().sum() < len(mm):
-            st.caption("NSE's FII statistics split out NIFTY futures only from 31 Jan 2023; earlier sessions are blank.")
+        if not nifty.empty:
+            hz = int(fs_h)
+            sb = core.signal_stats(fsig["bull_start"], nifty, hz)
+            sr = core.signal_stats(fsig["bear_start"], nifty, hz)
+            def stat_card(col, title, up, avg, n, colr):
+                v = "–" if pd.isna(up) else f"{up:.0f}%"
+                sub = "" if pd.isna(avg) else f"average {avg:+.2f}%" + (f" · {n} signals" if n is not None else "")
+                col.markdown(f"<div style='border-left:5px solid {colr};padding:6px 12px;background:#f8f9f9;"
+                             f"border-radius:6px;margin-bottom:6px'><div style='font-size:.85rem;color:#566573'>"
+                             f"{title}</div><div style='font-size:1.6rem;font-weight:700'>{v}</div>"
+                             f"<div style='font-size:.85rem;color:#566573'>{sub}</div></div>",
+                             unsafe_allow_html=True)
+            g1, g2, g3 = st.columns(3)
+            stat_card(g1, f"After ▲: NIFTY higher {hz} sessions later", sb["up"], sb["avg"], sb["n"], "#1e8449")
+            stat_card(g2, f"After ▼: NIFTY higher {hz} sessions later", sr["up"], sr["avg"], sr["n"], "#c0392b")
+            stat_card(g3, f"Any session: NIFTY higher {hz} sessions later", sb["base_up"], sb["base_avg"], None,
+                      "#7f8c8d")
+        st.caption("Markers sit on the NIFTY line. ▲ = FII NIFTY-futures buying picking up (the 20-session sum "
+                   + (f"rose by more than ₹{fs_buf:,} cr over {fs_n} sessions" if turn else
+                      f"moved above +₹{fs_buf:,} cr") + "); ▼ = the reverse. A new ▲ needs a ▼ in between, so "
+                   "marks don't flicker. The stats above use all saved data in the analysis period, starting from "
+                   "the close after each mark (NSE publishes after the close). A useful ▲ should beat the "
+                   "'all sessions' figure and a useful ▼ should fall short of it. On 2023–26 data (default "
+                   "settings) both worked well in 2023–24, but in 2025–26 only ▼ kept a partial edge — keep an eye "
+                   "on these numbers. NIFTY-specific FII figures start on 31 Jan 2023.")
 
         w2 = chart_header("Who is long the index? (vs NIFTY spot)", "win_long", last)
         k1, k2, k3 = st.columns([1, 1, 2])

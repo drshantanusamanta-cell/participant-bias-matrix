@@ -610,3 +610,37 @@ def fii_client_divergence(m: pd.DataFrame, lookback: int = 3, thr: float = 3.0) 
     out["bull_start"] = bull & ~bull.shift(1, fill_value=False)
     out["bear_start"] = bear & ~bear.shift(1, fill_value=False)
     return out
+
+
+# ----------------------------------------------------------------- FII NIFTY ₹ flow signal
+def flow_signal(e2_20: pd.Series, mode: str = "turn", lookback: int = 10, buffer: float = 2000) -> pd.DataFrame:
+    """Signal from the 20-session sum of FII NIFTY-futures net ₹ flow.
+    mode 'turn' : the sum rises (▲) / falls (▼) by more than `buffer` ₹ cr over `lookback` sessions.
+    mode 'cross': the sum moves above +buffer (▲) / below −buffer (▼).
+    Uses hysteresis: a new ▲ needs a ▼ state in between (and vice versa), so marks don't flicker."""
+    x = e2_20.diff(lookback) if mode == "turn" else e2_20
+    state = pd.Series(np.nan, index=x.index)
+    cur = np.nan
+    for i, v in x.items():
+        if not pd.isna(v):
+            if v > buffer:
+                cur = 1
+            elif v < -buffer:
+                cur = -1
+        state[i] = cur
+    changed = state.ne(state.shift()) & state.notna() & state.shift().notna()
+    return pd.DataFrame({"state": state, "bull_start": changed & (state == 1),
+                         "bear_start": changed & (state == -1), "driver": x})
+
+
+def signal_stats(starts: pd.Series, px: pd.Series, horizon: int = 20) -> dict:
+    """NIFTY move from the close after the signal (files come out after the close) over `horizon` sessions."""
+    px = px.reindex(starts.index).ffill()
+    fwd = px.shift(-(horizon + 1)) / px.shift(-1) - 1
+    valid = fwd.notna() & starts.notna()
+    r = fwd[starts & valid]
+    base = fwd[valid & px.notna()]
+    return {"n": int(len(r)), "up": (r > 0).mean() * 100 if len(r) else np.nan,
+            "avg": r.mean() * 100 if len(r) else np.nan,
+            "base_up": (base > 0).mean() * 100 if len(base) else np.nan,
+            "base_avg": base.mean() * 100 if len(base) else np.nan}
