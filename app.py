@@ -80,6 +80,29 @@ def show(target, fig, zoom=False):
     target.plotly_chart(fig, width="stretch", config=cfg)
 
 
+WINDOWS = ["1M", "3M", "6M", "1Y", "YTD", "ALL"]
+
+
+def chart_header(title: str, key: str, last: pd.Timestamp):
+    """Title on the left, 1M/3M/6M/1Y/YTD/ALL picker on the right (stacks on phones).
+    Returns the window start date (None = all). Data is sliced, so every axis rescales to the window."""
+    c1, c2 = st.columns([3, 2], vertical_alignment="bottom")
+    c1.markdown(f"<div class='ctitle'>{title}</div>", unsafe_allow_html=True)
+    choice = c2.segmented_control("Time window", WINDOWS, default="ALL", key=key,
+                                  label_visibility="collapsed") or "ALL"
+    months = {"1M": 1, "3M": 3, "6M": 6, "1Y": 12}
+    if choice in months:
+        return last - pd.DateOffset(months=months[choice])
+    if choice == "YTD":
+        return pd.Timestamp(year=last.year, month=1, day=1)
+    return None
+
+
+def in_window(x, start):
+    """Slice a Series/DataFrame with a DatetimeIndex to the chosen window."""
+    return x if start is None or len(x) == 0 else x[x.index >= start]
+
+
 def fmt(k, v):
     if pd.isna(v):
         return "–"
@@ -312,8 +335,9 @@ def main():
     # ---------------- TAB 3
     with tabs[2]:
         # One chart: NIFTY candles (left axis) with both composites overlaid (right axis, −2…+2 bands)
+        w0 = chart_header("NIFTY 50 (candles) with composite bias", "win_comp", last)
         fig = make_subplots(specs=[[{"secondary_y": True}]])
-        hh = hist.set_index("date")
+        hh = in_window(hist.set_index("date"), w0)
         has_ohlc = all(c in hh.columns for c in ["NIFTY_O", "NIFTY_H", "NIFTY_L", "NIFTY"])
         if has_ohlc and hh["NIFTY_O"].notna().any():
             o = hh[["NIFTY_O", "NIFTY_H", "NIFTY_L", "NIFTY"]].dropna()
@@ -323,37 +347,32 @@ def main():
                 decreasing=dict(line=dict(color="#c0392b", width=1), fillcolor="#e74c3c"),
                 whiskerwidth=0.3), secondary_y=False)
         elif not nifty.empty:
-            fig.add_scatter(x=nifty.index, y=nifty, name="NIFTY 50", line=dict(color="#1b4f72", width=2.2),
-                            secondary_y=False)
+            fig.add_scatter(x=in_window(nifty, w0).index, y=in_window(nifty, w0), name="NIFTY 50",
+                            line=dict(color="#1b4f72", width=2.2), secondary_y=False)
         for y0, y1, c in [(1, 2, "#82e0aa"), (0.4, 1, "#d5f5e3"), (-1, -0.4, "#fdebd0"), (-2, -1, "#f5b7b1")]:
             fig.add_hrect(y0=y0, y1=y1, fillcolor=c, opacity=0.22, line_width=0, layer="below",
                           secondary_y=True)
         fig.add_hline(y=0, line=dict(color="#95a5a6", width=1, dash="dot"), secondary_y=True)
-        fig.add_scatter(x=short.index, y=short, name="Short-term composite",
+        sw, mw = in_window(short, w0), in_window(med, w0)
+        fig.add_scatter(x=sw.index, y=sw, name="Short-term composite",
                         line=dict(color="#e67e22", width=1.2), opacity=0.75, secondary_y=True,
                         hovertemplate="%{y:+.2f}<extra>Short</extra>")
-        fig.add_scatter(x=med.index, y=med, name="Medium-term composite",
+        fig.add_scatter(x=mw.index, y=mw, name="Medium-term composite",
                         line=dict(color="#2e86c1", width=2.6), secondary_y=True,
                         hovertemplate="%{y:+.2f}<extra>Medium</extra>")
         fig.update_layout(
-            title="NIFTY 50 (candles) with composite bias",
             height=620, hovermode="x unified", dragmode="zoom", plot_bgcolor="white")
         fig.update_xaxes(
             rangebreaks=[dict(bounds=["sat", "mon"])], rangeslider=dict(visible=False),
-            showspikes=True, spikemode="across", spikethickness=1, spikecolor="#7f8c8d",
-            rangeselector=dict(buttons=[dict(count=1, label="1M", step="month", stepmode="backward"),
-                                        dict(count=3, label="3M", step="month", stepmode="backward"),
-                                        dict(count=6, label="6M", step="month", stepmode="backward"),
-                                        dict(count=1, label="1Y", step="year", stepmode="backward"),
-                                        dict(step="all", label="All")], x=0, y=1.02, yanchor="bottom"))
+            showspikes=True, spikemode="across", spikethickness=1, spikecolor="#7f8c8d")
         fig.update_yaxes(title="NIFTY 50", tickformat=",.0f", gridcolor="#eaeded", secondary_y=False)
         fig.update_yaxes(title="Composite (−2 … +2)", range=[-2.1, 2.1], fixedrange=True, showgrid=False,
                          tickvals=[-2, -1, -0.4, 0, 0.4, 1, 2], secondary_y=True)
         show(st, fig, zoom=True)
         st.caption("Green/red candles = NIFTY up/down day (left scale). Blue = medium-term composite, orange = "
                    "short-term (right scale); background bands = strong bearish → strong bullish zones. "
-                   "Drag a box over any period to magnify it (NIFTY rescales; composite scale stays −2…+2), "
-                   "use the 1M–1Y buttons or the mouse wheel, and double-click to return to the full view.")
+                   "Pick 1M–ALL to change the period (all scales refit), drag a box to magnify further, "
+                   "and double-click to undo the zoom.")
 
         with st.expander("📅 Date-wise check: did the earlier bias call NIFTY's move?", expanded=False):
             if nifty.empty:
@@ -415,51 +434,58 @@ def main():
                     "worked the wrong way. NSE files come out after the close, so in practice you could act one "
                     "session later than T−lag.")
 
-        nn = nifty[nifty.index >= m.index.min()] if not nifty.empty else nifty
         nifty_line = dict(color="#7d3c98", width=2.2)
 
+        w1 = chart_header("FII NIFTY futures net ₹ crore (buy − sell) vs NIFTY spot", "win_e", last)
+        mm = in_window(m, w1)
+        nn = in_window(nifty[nifty.index >= m.index.min()], w1) if not nifty.empty else nifty
         fig = make_subplots(specs=[[{"secondary_y": True}]])
-        e = m["E_day"].dropna()
+        e = mm["E_day"].dropna()
         fig.add_bar(x=e.index, y=e, name="FII NIFTY futures net ₹ cr (daily)",
                     marker_color=np.where(e >= 0, "#27ae60", "#c0392b"), opacity=0.8,
                     hovertemplate="₹%{y:,.0f} cr<extra>Daily</extra>")
-        fig.add_scatter(x=m.index, y=m["E2_20"], name="20-session sum", line=dict(color="#2c3e50", width=2),
+        fig.add_scatter(x=mm.index, y=mm["E2_20"], name="20-session sum", line=dict(color="#2c3e50", width=2),
                         hovertemplate="₹%{y:,.0f} cr<extra>20-session</extra>")
         if not nn.empty:
             fig.add_scatter(x=nn.index, y=nn, name="NIFTY spot", line=nifty_line, secondary_y=True,
                             hovertemplate="%{y:,.0f}<extra>NIFTY</extra>")
         fig.add_hline(y=0, line=dict(color="#95a5a6", width=1))
-        fig.update_layout(title="FII NIFTY futures net ₹ crore (buy − sell) vs NIFTY spot", height=420,
+        fig.update_layout(height=420,
                           hovermode="x unified", bargap=0, dragmode="zoom")
         fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
         fig.update_yaxes(title="₹ crore", tickformat=",.0f", secondary_y=False)
         fig.update_yaxes(title="NIFTY", tickformat=",.0f", showgrid=False, secondary_y=True)
         show(st, fig, zoom=True)
-        if m["E_day"].notna().sum() < len(m):
+        if mm["E_day"].notna().sum() < len(mm):
             st.caption("NSE's FII statistics split out NIFTY futures only from 31 Jan 2023; earlier sessions are blank.")
 
+        w2 = chart_header("Who is long the index? (vs NIFTY spot)", "win_long", last)
+        mm = in_window(m, w2)
+        nn = in_window(nifty[nifty.index >= m.index.min()], w2) if not nifty.empty else nifty
         fig = make_subplots(specs=[[{"secondary_y": True}]])
-        fig.add_scatter(x=m.index, y=m["A1"], name="FII long share %", line=dict(color="#2e86c1", width=2))
-        fig.add_scatter(x=m.index, y=m["A5"], name="Client long share %", line=dict(color="#17a589", dash="dot"))
+        fig.add_scatter(x=mm.index, y=mm["A1"], name="FII long share %", line=dict(color="#2e86c1", width=2))
+        fig.add_scatter(x=mm.index, y=mm["A5"], name="Client long share %", line=dict(color="#17a589", dash="dot"))
         if not nn.empty:
             fig.add_scatter(x=nn.index, y=nn, name="NIFTY spot", line=nifty_line, secondary_y=True,
                             hovertemplate="%{y:,.0f}<extra>NIFTY</extra>")
-        fig.update_layout(title="Who is long the index? (vs NIFTY spot)", height=400, hovermode="x unified")
+        fig.update_layout(height=400, hovermode="x unified")
         fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
         fig.update_yaxes(title="Long share %", secondary_y=False)
         fig.update_yaxes(title="NIFTY", tickformat=",.0f", showgrid=False, secondary_y=True)
         show(st, fig)
 
+        w3 = chart_header("FII net index futures (contracts) vs NIFTY spot - contracts affected by "
+                          "lot-size changes", "win_a2", last)
+        mm = in_window(m, w3)
         fig = make_subplots(specs=[[{"secondary_y": True}]])
-        fig.add_bar(x=m.index, y=m["A2"], name="FII net index futures",
-                    marker_color=np.where(m["A2"] >= 0, "#27ae60", "#c0392b"), opacity=0.75,
+        fig.add_bar(x=mm.index, y=mm["A2"], name="FII net index futures",
+                    marker_color=np.where(mm["A2"] >= 0, "#27ae60", "#c0392b"), opacity=0.75,
                     hovertemplate="%{y:,.0f} contracts<extra>FII net</extra>")
         if not nifty.empty:
-            nn = nifty[nifty.index >= m.index.min()]
+            nn = in_window(nifty[nifty.index >= m.index.min()], w3)
             fig.add_scatter(x=nn.index, y=nn, name="NIFTY spot", line=dict(color="#1b4f72", width=2),
                             hovertemplate="%{y:,.0f}<extra>NIFTY</extra>", secondary_y=True)
-        fig.update_layout(title="FII net index futures (contracts) vs NIFTY spot - contracts affected by "
-                                "lot-size changes", height=420, hovermode="x unified", bargap=0)
+        fig.update_layout(height=420, hovermode="x unified", bargap=0)
         fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])  # hide weekend gaps
         fig.update_yaxes(title="Net contracts", tickformat=",.0f", secondary_y=False)
         fig.update_yaxes(title="NIFTY", tickformat=",.0f", showgrid=False, secondary_y=True)
