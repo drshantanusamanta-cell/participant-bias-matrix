@@ -542,9 +542,11 @@ def main():
         for col, lab, sym, colr in [("bull", "FII adding longs · Clients cutting", "triangle-up", "#1e8449"),
                                     ("bear", "FII cutting longs · Clients adding", "triangle-down", "#c0392b")]:
             idx = dvw.index[dvw[col] if dv_all else dvw[col + "_start"]]
-            if len(idx):
+            if not nn.empty:
+                idx = idx[idx.isin(nn.index)]
+            if len(idx) and not nn.empty:
                 fig.add_scatter(
-                    x=idx, y=mm.loc[idx, "A1"], mode="markers", name=lab,
+                    x=idx, y=nn.loc[idx], mode="markers", name=lab, secondary_y=True,
                     marker=dict(symbol=sym, size=12, color=colr, line=dict(color="white", width=1)),
                     customdata=np.stack([dvw.loc[idx, "dFII"], dvw.loc[idx, "dClient"]], axis=1),
                     hovertemplate="FII %{customdata[0]:+.1f} pts · Client %{customdata[1]:+.1f} pts"
@@ -555,7 +557,7 @@ def main():
         fig.update_yaxes(title="NIFTY", tickformat=",.0f", showgrid=False, secondary_y=True)
         show(st, fig)
         nb, nr = int(dvw["bull_start"].sum()), int(dvw["bear_start"].sum())
-        st.caption(f"▲ green = FII long share up and Client long share down by ≥{dv_t:g} pts over {dv_n} "
+        st.caption(f"Markers sit on the NIFTY line. ▲ green = FII long share up and Client long share down by ≥{dv_t:g} pts over {dv_n} "
                    f"sessions ({nb} episodes in view); ▼ red = the reverse ({nr} episodes). Tested on 12 years "
                    "of data (default settings), these marks describe what just happened: NIFTY had risen over the "
                    "same 3 sessions in about 4 of 5 ▲ cases and fallen in about 7 of 10 ▼ cases. They did not "
