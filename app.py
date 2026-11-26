@@ -317,9 +317,20 @@ def main():
         fig.update_layout(title="FII NIFTY futures net ₹ crore (buy − sell)", height=380, hovermode="x unified")
         c2.plotly_chart(fig, width="stretch")
 
-        fig = go.Figure(go.Bar(x=m.index, y=m["A2"], marker_color=np.where(m["A2"] >= 0, "#27ae60", "#c0392b")))
-        fig.update_layout(title="FII net index futures (contracts) - context only, affected by lot-size changes",
-                          height=320)
+        fig = make_subplots(specs=[[{"secondary_y": True}]])
+        fig.add_bar(x=m.index, y=m["A2"], name="FII net index futures",
+                    marker_color=np.where(m["A2"] >= 0, "#27ae60", "#c0392b"), opacity=0.75,
+                    hovertemplate="%{y:,.0f} contracts<extra>FII net</extra>")
+        if not nifty.empty:
+            nn = nifty[nifty.index >= m.index.min()]
+            fig.add_scatter(x=nn.index, y=nn, name="NIFTY spot", line=dict(color="#1b4f72", width=2),
+                            hovertemplate="%{y:,.0f}<extra>NIFTY</extra>", secondary_y=True)
+        fig.update_layout(title="FII net index futures (contracts) vs NIFTY spot - contracts affected by "
+                                "lot-size changes", height=420, hovermode="x unified", bargap=0,
+                          legend=dict(orientation="h", y=1.08, x=1, xanchor="right"))
+        fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])  # hide weekend gaps
+        fig.update_yaxes(title="Net contracts", tickformat=",.0f", secondary_y=False)
+        fig.update_yaxes(title="NIFTY", tickformat=",.0f", showgrid=False, secondary_y=True)
         st.plotly_chart(fig, width="stretch")
 
     # ---------------- TAB 4
